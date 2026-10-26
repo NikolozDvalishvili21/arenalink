@@ -1,129 +1,197 @@
-# ArenaLink: არქიტექტურა (პრაქტიკული 2)
+# ArenaLink: არქიტექტურა
 
-> Product Backlog: [README.md](../README.md)
+Product Backlog: [backlog.md](backlog.md)
 
 ## არქიტექტურული სტილი
 
-ArenaLink-ისთვის ვირჩევ **მოდულურ მონოლითს event-driven ელემენტით** (ცოცხალი განახლებები Redis pub/sub-ით). სცენარი: **D, საკუთარი იდეა** (ლექტორთან შეთანხმება საჭიროა); ის A-ს ახლოსაა, რადგან ტურნირის დღეს დატვირთვა მკვეთრად იზრდება (NFR-02: 500 ერთდროული მაყურებელი ერთ ტურნირზე).
+ArenaLink-ს ვაკეთებ როგორც **მოდულურ მონოლითს**. ეს ერთი აპლიკაციაა, რომელიც შიგნით ცალკე მოდულებად არის დაყოფილი (Auth, Tournaments, Teams, Registration, Matches, Payments, Notifications). მოდულები ერთმანეთს მოვლენებით (event) ესაუბრებიან, ამიტომ არქიტექტურას ნაწილობრივ event-driven ელემენტიც აქვს.
 
-1. **ერთი დეველოპერი, ერთი სემესტრი.** ერთი გასაშვები ერთეული (deploy) მარტივია, მიკროსერვისების მართვა (სერვისების აღმოჩენა, ცალკე CI/CD, ქსელური შეცდომები) მხოლოდ დროს წაიღებდა. მოდულებს (Auth, Tournaments, Teams, Registration, Matches, Payments, Notifications) გარკვეული საზღვრები აქვთ, ამიტომ საჭიროებისას ცალკე სერვისად გამოიტანება.
-2. **პიკური დატვირთვა ძირითადად წაკითხვაა.** ტურნირის დღეს ათასობით ადამიანი ბრეკეტს უყურებს, წერა კი ცოტაა. აპლიკაცია stateless-ია, ამიტომ რამდენიმე ეგზემპლარი load balancer-ის უკან მუშაობს, ბრეკეტი Redis-ში იკეშება, WebSocket-ის შეტყობინებები კი pub/sub-ით ყველა ეგზემპლარს ჩაეწოდება.
-3. **რეგისტრაცია და გადახდა მკაცრ თანმიმდევრულობას საჭიროებს.** NFR-05 მოითხოვს, რომ 50 პარალელური მოთხოვნიდან ერთ ადგილზე მხოლოდ ერთი გავიდეს. ერთ PostgreSQL ბაზაში ეს ჩვეულებრივი ტრანზაქციითა და ბლოკირებით (`SELECT ... FOR UPDATE`) მოგვარდება, მიკროსერვისებში კი განაწილებულ ტრანზაქციას (saga) მოითხოვდა.
+სცენარად ავირჩიე D, საკუთარი იდეა, ამიტომ ლექტორთან შეთანხმება მჭირდება. A სცენარს (დატვირთვა და მასშტაბირება) ისე ჰგავს, რომ ტურნირის დღეს დატვირთვა მკვეთრად იზრდება.
+
+რატომ ეს სტილი:
+
+1. **ერთი დეველოპერი და ერთი სემესტრი.** ერთი აპლიკაცია ერთხელ უნდა გავუშვა და ერთხელ დავაკონფიგურირო. მიკროსერვისებისთვის ცალკე deploy, ცალკე CI და სერვისებს შორის ქსელური შეცდომების დამუშავება დამჭირდებოდა, ეს კი დროს წამართმევდა. მოდულებს ერთმანეთისგან მკაფიო საზღვრები აქვთ, ამიტომ საჭიროების შემთხვევაში მათგან რომელიმე მერე ცალკე სერვისად გამოიტანება.
+2. **დატვირთვა ძირითადად წაკითხვაა.** ტურნირის დროს ბრეკეტს ბევრი ადამიანი უყურებს, ჩაწერა კი იშვიათია (შედეგის დადასტურება). ამიტომ ბრეკეტს Redis-ში ვინახავ და ბაზას მხოლოდ ცვლილებისას ვეკითხები. აპლიკაცია არ ინახავს მომხმარებლის მდგომარეობას, ამიტომ საჭიროების შემთხვევაში ორი ეგზემპლარი load balancer-ის უკან გავუშვა, WebSocket-ის შეტყობინებებს კი Redis-ის pub/sub ორივეს გადასცემს.
+3. **რეგისტრაცია და გადახდა სიზუსტეს ითხოვს.** ერთ თავისუფალ ადგილზე ორმა გუნდმა ერთდროულად არ უნდა მოახერხოს რეგისტრაცია (NFR-05). როცა ყველაფერი ერთ PostgreSQL ბაზაშია, ამას ჩვეულებრივი ტრანზაქცია და ჩაკეტვა წყვეტს. მიკროსერვისებში ცალკე ბაზებს შორის ამისთვის რთული განაწილებული ტრანზაქცია დამჭირდებოდა.
 
 ## კომპონენტების დიაგრამა
 
 ```mermaid
 flowchart TB
-    Client["კლიენტი<br/>Next.js (ორგანიზატორი, კაპიტანი, მაყურებელი)"]
+    Browser["Next.js კლიენტი"]
     LB["Load balancer"]
 
-    subgraph App["NestJS მოდულური მონოლითი (რამდენიმე stateless ეგზემპლარი)"]
-        direction TB
-        GQL["GraphQL API + WebSocket gateway"]
+    subgraph App["NestJS აპლიკაცია"]
+        API["GraphQL API და WebSocket"]
         Auth["Auth"]
-        Tour["Tournaments"]
+        Tournaments["Tournaments"]
         Teams["Teams"]
-        Reg["Registration"]
-        Match["Matches / Bracket"]
-        Pay["Payments (Adapter)"]
-        Notif["Notifications"]
-        Bus(["Event bus: MatchConfirmed, RegistrationConfirmed"])
+        Registration["Registration"]
+        Matches["Matches და ბრეკეტი"]
+        Payments["Payments"]
+        Notifications["Notifications"]
+        Bus(("Event bus"))
     end
 
-    PG[("PostgreSQL")]
-    Redis[("Redis: ბრეკეტის კეში + pub/sub")]
-    Provider["გადახდის პროვაიდერი (TBC / BOG)"]
+    DB[("PostgreSQL")]
+    Redis[("Redis")]
+    Provider["გადახდის პროვაიდერი"]
     Mail["ელფოსტის სერვისი"]
 
-    Client --> LB --> GQL
-    GQL --> Auth
-    GQL --> Tour
-    GQL --> Teams
-    GQL --> Reg
-    GQL --> Match
-    Reg --> Pay
-    Reg --> Bus
-    Match --> Bus
-    Bus --> Notif
+    Browser --> LB --> API
+    API --> Auth
+    API --> Tournaments
+    API --> Teams
+    API --> Registration
+    API --> Matches
+    Registration --> Payments --> Provider
+    Registration --> Bus
+    Matches --> Bus
+    Bus --> Notifications --> Mail
     Bus --> Redis
-    Auth --> PG
-    Tour --> PG
-    Teams --> PG
-    Reg --> PG
-    Match --> PG
-    Match --> Redis
-    Pay --> Provider
-    Provider -. webhook .-> Pay
-    Notif --> Mail
-    Redis -. pub/sub .-> GQL
+    Auth --> DB
+    Tournaments --> DB
+    Teams --> DB
+    Registration --> DB
+    Matches --> DB
+    Matches --> Redis
 ```
 
-კლიენტი load balancer-ით ერთ-ერთ ეგზემპლარს უკავშირდება, მოდულები event bus-ით ურთიერთობენ, ბრეკეტი Redis-იდან მოდის, ბაზა კი რეგისტრაციებს, შედეგებსა და ტრანზაქციებს ინახავს.
+კლიენტი მოთხოვნას load balancer-ით აპლიკაციის ერთ-ერთ ეგზემპლარს უგზავნის. API მოთხოვნას შესაბამის მოდულს გადასცემს. მოდულები მონაცემებს PostgreSQL-ში ინახავენ, ბრეკეტი კი Redis-შიც ინახება სწრაფი წაკითხვისთვის. როცა რამე მნიშვნელოვანი ხდება (მაგალითად, შედეგი დასტურდება), მოდული event bus-ში მოვლენას აგზავნის და დანარჩენები საჭიროებისამებრ რეაგირებენ: კეში ახლდება, მაყურებელი WebSocket-ით ახალ ბრეკეტს იღებს, მოთამაშეები კი შეტყობინებას იღებენ.
 
 ## Design Pattern-ები
 
-backend-ში ოთხი pattern ბიზნეს-წესებს მონაცემთა წვდომასა და ინტეგრაციებს ჰყოფს, frontend-ში სამი pattern ცოცხალ განახლებებს ამარტივებს.
+### Backend
 
-| ფენა | Pattern | სად გამოიყენება | რატომ |
-| --- | --- | --- | --- |
-| Backend | Repository | `TournamentRepository`, `TeamRepository`, `MatchRepository` | SQL ბიზნეს-ლოგიკიდან გამოყოფილია, სერვისები ბაზის გარეშე ტესტირდება |
-| Backend | Service Layer | `RegistrationService`, `BracketService` | ადგილის დაჯავშნა, გადახდა და ბრეკეტის აგება ერთ ტრანზაქციულ ადგილას ცხოვრობს |
-| Backend | Strategy | `BracketGenerator` (`SingleElimination` ახლა, `DoubleElimination` შემდეგ) | US-14-ის დამატება არსებულ კოდს არ ცვლის, მხოლოდ ახალ კლასს ამატებს |
-| Backend | Observer (event bus) | მოვლენა `MatchConfirmed` იწვევს ბრეკეტის განახლებას, WebSocket-ის გაგზავნას და კეშის გაუქმებას | მოდულები ერთმანეთს პირდაპირ არ იძახებენ, ახალი რეაქციის დამატება მარტივია |
-| Frontend | Custom Hook (ლოგიკის გამოყოფა) | `useBracketLive(tournamentId)`, `useRegistration()` | კომპონენტი მხოლოდ ხატავს, WebSocket-ისა და მოთხოვნების ლოგიკა ერთ ადგილას ინახება |
-| Frontend | Observer | WebSocket-ის გამოწერა ბრეკეტის არხზე | მატჩის დადასტურებისას UI გადატვირთვის გარეშე ახლდება (NFR-03) |
-| Frontend | Facade | `apiClient` ერთი მოდული ყველა GraphQL გამოძახებისთვის | ენდპოინტის ან სქემის ცვლილება მხოლოდ ერთ ფაილს ეხება |
+- **Repository.** `TournamentRepository`, `TeamRepository`, `MatchRepository`. SQL მოთხოვნები ბიზნეს-ლოგიკისგან ცალკეა, ამიტომ სერვისების ტესტირება ბაზის გარეშეც შეიძლება.
+- **Service Layer.** `RegistrationService`, `BracketService`. ბიზნეს-წესები (ადგილის დაჯავშნა, ბრეკეტის აგება) ერთ ადგილას არის და API-ზე დამოკიდებული არ არის.
+- **Strategy.** `BracketGenerator` ინტერფეისს ახლა `SingleElimination` ახორციელებს. როცა US-14 (double elimination) დადგება, ახალ კლასს დავამატებ და არსებულ კოდს არ შევცვლი.
+- **Observer.** მოდულები ერთმანეთს პირდაპირ არ იძახებენ. მაგალითად, მოვლენა `MatchConfirmed` ბრეკეტს ანახლებს, კეშს აუქმებს და WebSocket-ით მაყურებლებს აცნობებს. ახალი რეაქციის დამატება არსებულ კოდს არ ეხება.
 
-## API (GraphQL)
+### Frontend
 
-API სამი query-ისა და ორი mutation-ისგან შედგება, ვინაიდან ბრეკეტი ბუნებრივად ჩადგმული მონაცემია (ტურნირი → რაუნდები → მატჩები → გუნდები) და ერთი მოთხოვნით იტვირთება.
+- **Custom Hook.** `useBracketLive(tournamentId)` და `useRegistration()`. კომპონენტი მხოლოდ გამოსახავს, WebSocket-ისა და მოთხოვნების ლოგიკა კი hook-შია.
+- **Observer.** ბრეკეტის გვერდი WebSocket-ის არხზე იწერება და ახალი შედეგის მიღებისას გადატვირთვის გარეშე ახლდება (NFR-03).
+- **Facade.** ყველა GraphQL მოთხოვნა ერთი `apiClient` მოდულიდან გადის. თუ სქემა შეიცვალა, ცვლილება ერთ ფაილში შემაქვს.
 
-| ტიპი | ოპერაცია | შესატანი | შედეგი | წვდომა | Story |
-| --- | --- | --- | --- | --- | --- |
-| Query | `tournaments(status, game)` | სტატუსი და თამაში (არასავალდებულო) | ტურნირების სია | საჯარო | US-02 |
-| Query | `bracket(tournamentId)` | ტურნირის ID | რაუნდები, მატჩები, გუნდები და ანგარიში | საჯარო, იკეშება | US-07 |
-| Query | `myTeams` | არაფერი (ტოკენიდან) | ჩემი გუნდები და წევრები | ავტორიზებული | US-03 |
-| Mutation | `registerTeam(tournamentId, teamId)` | ტურნირი და გუნდი | რეგისტრაცია და გადახდის სესია (ადგილი 10 წუთით ჯავშნდება) | კაპიტანი | US-04 |
-| Mutation | `submitMatchResult(matchId, scoreA, scoreB)` | მატჩი და ანგარიში | მატჩი სტატუსით „ელოდება დადასტურებას“ | კაპიტანი | US-06 |
+## API
 
-ცოცხალი განახლებისთვის დამატებით არის subscription `bracketUpdated(tournamentId)` (WebSocket), ის 5 ოპერაციაში არ ითვლება (US-08a).
+API GraphQL-ია. ავირჩიე იმიტომ, რომ ბრეკეტი ჩადგმული მონაცემია (ტურნირი, რაუნდები, მატჩები, გუნდები) და ერთი მოთხოვნით მთლიანად იტვირთება, ცალკე ბევრი endpoint-ის გარეშე. ძირითადი ხუთი ოპერაცია:
 
-## ბაზა: PostgreSQL (SQL)
+```graphql
+type Query {
+  # ტურნირების სია, ფილტრით სტატუსსა და თამაშზე (საჯარო, US-02)
+  tournaments(status: TournamentStatus, game: String): [Tournament!]!
 
-ძირითადი ბაზა არის PostgreSQL, რადგან მონაცემები მკაცრად დაკავშირებულია (გუნდი, რეგისტრაცია, გადახდა, მატჩი) და ადგილის დაჯავშნას ტრანზაქცია სჭირდება. NoSQL იქ არ გამოიყენება; Redis მხოლოდ ბრეკეტის კეშისა და pub/sub-ისთვისაა, ამიტომ მასში დაკარგული მონაცემი არაფერს არღვევს.
+  # ბრეკეტი მატჩებითა და ანგარიშებით (საჯარო, იკეშება, US-07)
+  bracket(tournamentId: ID!): Bracket!
 
-| ცხრილი | მთავარი ველები | კავშირი |
-| --- | --- | --- |
-| `users` | `id`, `email` (UNIQUE), `password_hash`, `role` (player / organizer / admin) | |
-| `teams` | `id`, `name` (UNIQUE), `captain_id` | `captain_id` → `users` |
-| `team_members` | `team_id`, `user_id`, `status` (invited / accepted), PK (`team_id`, `user_id`) | → `teams`, `users` |
-| `tournaments` | `id`, `organizer_id`, `name`, `game`, `starts_at`, `max_teams` (CHECK 4, 8, 16 ან 32), `entry_fee`, `status` (draft / open / closed / live / finished) | `organizer_id` → `users` |
-| `registrations` | `id`, `tournament_id`, `team_id`, `status` (reserved / confirmed / expired), `reserved_until`, UNIQUE (`tournament_id`, `team_id`) | → `tournaments`, `teams` |
-| `payments` | `id`, `registration_id`, `provider_ref`, `amount`, `status` | `registration_id` → `registrations` |
-| `matches` | `id`, `tournament_id`, `round`, `position`, `team_a_id`, `team_b_id`, `score_a`, `score_b`, `status` (scheduled / live / awaiting / disputed / done), `next_match_id` | → `tournaments`, `teams`; `next_match_id` → `matches` (გამარჯვებულის გზა) |
+  # ჩემი გუნდები და მათი წევრები (ავტორიზებული, US-03)
+  myTeams: [Team!]!
+}
 
-**ადგილის დაჯავშნა (NFR-05):** ტრანზაქცია ბლოკავს ტურნირის სტრიქონს (`SELECT ... FOR UPDATE`), ითვლის `reserved` და `confirmed` რეგისტრაციებს და მხოლოდ ლიმიტზე ნაკლების შემთხვევაში ამატებს ახალს. ამიტომ 50 პარალელური მოთხოვნიდან ერთი გადის.
+type Mutation {
+  # გუნდის რეგისტრაცია და გადახდის სესია, ადგილი 10 წუთით ინახება (კაპიტანი, US-04)
+  registerTeam(tournamentId: ID!, teamId: ID!): Registration!
 
-**ინდექსი:** `matches (tournament_id, round)` აჩქარებს `bracket` query-ს (NFR-01), ვადაგასული `reserved` რეგისტრაციები ყოველ წუთს მუშაობს ფონური job-ით და ადგილს ათავისუფლებს.
+  # შედეგის გაგზავნა (კაპიტანი, US-06)
+  submitMatchResult(matchId: ID!, scoreA: Int!, scoreB: Int!): Match!
+}
+```
 
-## ტექნოლოგიური სტეკი და რისკები
+შედეგის დადასტურებისთვის ცალკე mutation არ მჭირდება. პირველი კაპიტანი ანგარიშს აგზავნის და მატჩი „ელოდება დადასტურებას“ სტატუსში გადადის. თუ მეორე კაპიტანიც იგივე ანგარიშს გამოგზავნის, მატჩი იხურება. თუ სხვა ანგარიშს გამოგზავნის, მატჩი „სადავო“ ხდება.
 
-სტეკი ერთ ენას (TypeScript) იყენებს frontend-სა და backend-ში, რაც ერთ დეველოპერს კონტექსტის გადართვას ამცირებს.
+ცოცხალი განახლებისთვის დამატებით არსებობს subscription `bracketUpdated(tournamentId)` WebSocket-ზე (US-08a). სხვა ოპერაციები, როგორიცაა შესვლა ან ტურნირის შექმნა, ამ ხუთში არ შემიყვანია, მაგრამ აპლიკაციაში ისინიც იქნება.
 
-| ფენა | ტექნოლოგია | რატომ |
-| --- | --- | --- |
-| Frontend | Next.js (React) + TypeScript | სწრაფი ჩატვირთვა (NFR-01) სერვერული რენდერით, ცნობილი ინსტრუმენტი |
-| Backend | NestJS (Node.js) + GraphQL | მოდულური სტრუქტურა და dependency injection მონოლითის მოდულებს ბუნებრივად ერგება |
-| ბაზა | PostgreSQL + Prisma | ტრანზაქციები, შეზღუდვები, ტიპიზებული მოთხოვნები |
-| კეში და pub/sub | Redis | ბრეკეტის კეში და WebSocket-ის შეტყობინებები რამდენიმე ეგზემპლარს შორის |
-| ავტორიზაცია | JWT httpOnly cookie-ში, პაროლები bcrypt-ით | ტოკენი JavaScript-ს არ ეხება |
-| გადახდა | პროვაიდერის ტესტ რეჟიმი (მაგ. TBC ან BOG), Adapter-ის უკან | პროვაიდერის შეცვლა ბიზნეს-ლოგიკას არ ეხება |
-| ტესტები და CI | Jest, k6 (დატვირთვა), GitHub Actions | შესაბამისობა Definition of Done-თან და NFR-02-ის შემოწმებასთან |
+## ბაზა
 
-**რისკები:**
+ძირითად ბაზად PostgreSQL ავირჩიე (SQL). მონაცემები მჭიდროდ არის ერთმანეთთან დაკავშირებული (გუნდი, რეგისტრაცია, გადახდა, მატჩი), გადახდასთან ერთად კი ტრანზაქციები მჭირდება. NoSQL-ს ვერ დავინახე რაიმე უპირატესობა. Redis ბაზა არ არის, ის მხოლოდ კეშისა და pub/sub-ისთვის მჭირდება, ამიტომ მისი მონაცემების დაკარგვა არაფერს გვიფუჭებს, ბრეკეტი ბაზიდან თავიდან აშენდება.
 
-| რისკი | რატომ საშიშია | შერბილება |
-| --- | --- | --- |
-| ტურნირის დღის დატვირთვა | 500 ერთდროული მაყურებელი შეიძლება ბაზასა და WebSocket-ს გადაჭარბებით დაეყრდნოს და ბრეკეტი შეყოვნდეს (NFR-02, NFR-03) | `bracket` იკეშება Redis-ში და ბაზას მხოლოდ ცვლილებისას ეკითხება; k6 ტესტი დაგეგმილ დატვირთვაზე; WebSocket-ის გაწყვეტისას polling-ზე გადასვლა (US-08c) |
-| გადახდისა და ადგილის სინქრონიზაცია | გადახდა დასრულდება, მაგრამ webhook დაგვიანდეს ან ორჯერ მოვიდეს; ადგილი დაიკარგოს ან გაორმაგდეს | ადგილი `reserved` სტატუსით 10 წუთით ჯავშნდება, webhook idempotent-ია (`provider_ref` უნიკალურია), ვადაგასული ადგილი job-ით თავისუფლდება |
-| ვადა და მოცულობა ერთი დეველოპერისთვის | 66 ქულა დაგეგმილი სამუშაო ერთ სემესტრში შეიძლება ვერ ჩაეტიოს | MVP მხოლოდ Must story-ებია (37 ქულა), Should და Could სპრინტების ბოლოს გადადის, მოდულური მონოლითი ამარტივებს გაშვებას |
+სქემა (შემოკლებული):
+
+```sql
+CREATE TABLE users (
+  id            SERIAL PRIMARY KEY,
+  email         TEXT UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL,
+  role          TEXT NOT NULL            -- player, organizer, admin
+);
+
+CREATE TABLE teams (
+  id         SERIAL PRIMARY KEY,
+  name       TEXT UNIQUE NOT NULL,
+  captain_id INT NOT NULL REFERENCES users(id)
+);
+
+CREATE TABLE team_members (
+  team_id INT REFERENCES teams(id),
+  user_id INT REFERENCES users(id),
+  status  TEXT NOT NULL,                 -- invited, accepted
+  PRIMARY KEY (team_id, user_id)
+);
+
+CREATE TABLE tournaments (
+  id           SERIAL PRIMARY KEY,
+  organizer_id INT NOT NULL REFERENCES users(id),
+  name         TEXT NOT NULL,
+  game         TEXT NOT NULL,
+  starts_at    TIMESTAMPTZ NOT NULL,
+  max_teams    INT NOT NULL CHECK (max_teams IN (4, 8, 16, 32)),
+  entry_fee    NUMERIC(10,2) NOT NULL,
+  status       TEXT NOT NULL             -- draft, open, closed, live, finished
+);
+
+CREATE TABLE registrations (
+  id             SERIAL PRIMARY KEY,
+  tournament_id  INT NOT NULL REFERENCES tournaments(id),
+  team_id        INT NOT NULL REFERENCES teams(id),
+  status         TEXT NOT NULL,          -- reserved, confirmed, expired
+  reserved_until TIMESTAMPTZ,
+  UNIQUE (tournament_id, team_id)
+);
+
+CREATE TABLE payments (
+  id              SERIAL PRIMARY KEY,
+  registration_id INT NOT NULL REFERENCES registrations(id),
+  provider_ref    TEXT UNIQUE NOT NULL,
+  amount          NUMERIC(10,2) NOT NULL,
+  status          TEXT NOT NULL
+);
+
+CREATE TABLE matches (
+  id            SERIAL PRIMARY KEY,
+  tournament_id INT NOT NULL REFERENCES tournaments(id),
+  round         INT NOT NULL,
+  position      INT NOT NULL,
+  team_a_id     INT REFERENCES teams(id),
+  team_b_id     INT REFERENCES teams(id),
+  score_a       INT,
+  score_b       INT,
+  status        TEXT NOT NULL,           -- scheduled, live, awaiting, disputed, done
+  next_match_id INT REFERENCES matches(id)  -- სად გადადის გამარჯვებული
+);
+
+CREATE INDEX ON matches (tournament_id, round);
+```
+
+ადგილის დაჯავშნა (NFR-05) ერთ ტრანზაქციაშია: ჯერ ტურნირის სტრიქონს ვკეტავ (`SELECT ... FOR UPDATE`), მერე ვითვლი `reserved` და `confirmed` რეგისტრაციებს და თუ ლიმიტს არ მივაღწიეთ, ახალ რეგისტრაციას ვამატებ. ამიტომ 50 ერთდროული მოთხოვნიდან მხოლოდ ერთი გადის. ვადაგასულ `reserved` რეგისტრაციებს ფონური job ყოველ წუთში ათავისუფლებს. ინდექსი `(tournament_id, round)` `bracket` query-ს აჩქარებს (NFR-01).
+
+## ტექნოლოგიები
+
+Frontend და backend ორივე TypeScript-ზეა, რომ ერთ ენაზე ვიმუშაო და ერთი დეველოპერისთვის კონტექსტის გადართვა ნაკლები იყოს.
+
+- **Frontend:** Next.js (React) და TypeScript. სერვერული რენდერინგი ბრეკეტის გვერდის სწრაფ ჩატვირთვას (NFR-01) ეხმარება.
+- **Backend:** NestJS და GraphQL. მისი მოდულური სტრუქტურა და dependency injection მოდულურ მონოლითს კარგად ერგება.
+- **ბაზა:** PostgreSQL და Prisma (ტრანზაქციები, შეზღუდვები და ტიპიზებული მოთხოვნები).
+- **კეში და pub/sub:** Redis.
+- **ავტორიზაცია:** JWT httpOnly cookie-ში, რომ ტოკენს JavaScript-ი ვერ წვდებოდეს. პაროლები bcrypt-ით ინახება.
+- **გადახდა:** პროვაიდერის (TBC ან BOG) სატესტო რეჟიმი, მაგრამ adapter-ის უკან, რომ პროვაიდერის შეცვლა ბიზნეს-ლოგიკას არ შეეხოს.
+- **ტესტები და CI:** Jest, k6 (დატვირთვის ტესტისთვის) და GitHub Actions.
+
+## რისკები
+
+**ტურნირის დღის დატვირთვა.** ბევრმა ადამიანმა ერთდროულად რომ გახსნას ბრეკეტი, ბაზა და WebSocket შეიძლება გადაიტვირთოს და ბრეკეტი დაგვიანდეს (NFR-02, NFR-03). ამიტომ ბრეკეტს Redis-ში ვინახავ და ბაზას მხოლოდ ცვლილებისას ვეკითხები. დატვირთვას k6-ით წინასწარ გავტესტავ, ხოლო WebSocket-ის გაწყვეტისას გვერდი polling-ზე გადავა (US-08c).
+
+**გადახდისა და ადგილის სინქრონიზაცია.** შეიძლება მომხმარებელმა გადაიხადოს, მაგრამ პროვაიდერის webhook დაგვიანდეს ან ორჯერ მოვიდეს, ამიტომ ადგილი ან დაიკარგოს, ან გაორმაგდეს. ამის წინააღმდეგ ადგილი 10 წუთით `reserved` სტატუსით მაქვს დაჯავშნილი, webhook-ის დამუშავება განმეორებისას იგივე შედეგს იძლევა (`provider_ref` უნიკალურია), ვადაგასული ადგილი კი ფონური job-ით თავისუფლდება.
+
+**ერთი დეველოპერისთვის მოცულობა.** დაგეგმილი სამუშაო (Must და Should) 56 ქულაა, ანუ საკმაოდ ახლოსაა იმ ტევადობასთან, რასაც ერთი სემესტრის განმავლობაში მოვასწრებ. ამიტომ MVP მხოლოდ Must story-ებია (37 ქულა), დანარჩენი კი სპრინტების ბოლოს მოდის და საჭიროების შემთხვევაში გადადის. მოდულური მონოლითი გაშვებასა და მართვას ამარტივებს.
