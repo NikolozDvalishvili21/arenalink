@@ -4,11 +4,10 @@ Product Backlog: [backlog.md](backlog.md)
 
 ## არქიტექტურული სტილი
 
-ArenaLink არის **მოდულური მონოლითი**: ერთი Next.js აპლიკაცია, რომელიც შიგნით რამდენიმე მოდულად არის დაყოფილი (Auth, Tournaments, Teams, Registration, Matches). მოდულები ერთმანეთს პირდაპირ იძახებენ.რატომ ეს სტილი:
+ArenaLink არის **მოდულური მონოლითი**: ერთი Next.js აპლიკაცია, რომელიც შიგნით რამდენიმე მოდულად არის დაყოფილი (Auth, Tournaments, Teams, Registration, Matches). მოდულები ერთმანეთს პირდაპირ იძახებენ.
 
-1. **ერთი დეველოპერი, ერთი სემესტრი.** ერთ აპლიკაციას ერთხელ ვუშვებ და ერთი CI მაქვს. მიკროსერვისები ამ ზომის პროექტისთვის ზედმეტი სამუშაო იქნებოდა.
-2. **რეგისტრაციას სიზუსტე სჭირდება.** ბოლო ადგილზე ორი გუნდი ერთად არ უნდა დარეგისტრირდეს (NFR-05). ერთ ბაზაში ამას ჩვეულებრივი ტრანზაქცია წყვეტს.
-3. **Next.js უკვე ვიცი.** სამსახურშიც მას ვიყენებ, ამიტომ ახალი ფრეიმვორკის სწავლაზე დროს არ დავკარგავ.
+**მონოლითური** სისტემა შეირჩა, რადგან გუნდი 1 კაციანია და სწრაფი/მარტივი სამართავია ერთი აპლიკაცია და მიკროსერვისები ამ ზომის პროექტისთვის ზედმეტი სამუშაო იქნებოდა.
+
 
 ## კომპონენტების დიაგრამა
 
@@ -18,13 +17,13 @@ Registration -> გადახდის პროვაიდერი (TBC / B
 გადახდის პროვაიდერი -> Next.js (webhook)
 ```
 
- ბრაუზერი გვერდს Next.js-დან იღებს, მონაცემებს კი API route-ებიდან. API მოთხოვნას შესაბამის მოდულს გადასცემს, მოდული კი PostgreSQL-ს მიმართავს. გადახდისას Registration მოდული პროვაიდერს უკავშირდება, პროვაიდერი კი შედეგს webhook-ით აბრუნებს.
+ბრაუზერი Next.js-ს ხედავს, მონაცემებს კი API-დან იღებს. API მოთხოვნას შესაბამის მოდულს გადასცემს, მოდული კი PostgreSQL-ს მიმართავს. გადახდისას Registration მოდული პროვაიდერს უკავშირდება, პროვაიდერი კი შედეგს webhook-ით აბრუნებს.
 
 ## Design Pattern-ები
 
-- **Repository (backend).** `TournamentRepository`, `MatchRepository` და ა.შ. ბაზასთან მუშაობა ბიზნეს-ლოგიკისგან ცალკეა, ამიტომ ლოგიკის ტესტირება ბაზის გარეშე შემიძლია.
-- **Strategy (backend).** `BracketGenerator` ინტერფეისს ახლა მხოლოდ `SingleElimination` ახორციელებს. თუ ოდესმე double elimination (US-14) გაკეთდება, ახალ კლასს დავამატებ და ძველს არ შევეხები.
-- **Custom Hook (frontend).** `useBracket(tournamentId)`: მონაცემების წამოღება და განახლება hook-შია, კომპონენტი მხოლოდ ხატავს.
+- Repository (backend). ბაზასთან მუშაობის კოდი ცალკე ფაილშია. მაგალითად: როცა ცხრილების გვერდს ტურნირის მატჩები სჭირდება, ის ბაზას პირდაპირ არ ეკითხება, არამედ MatchRepository-ს მეშვეობით წამოიღებს ინფორმაციას. თუ ბაზა ოდესმე შეიცვლება, მხოლოდ ამ ერთი ფაილის კონფიგურაცია იქნება საჭირო.
+- Strategy (backend). ცხრილის აგების წესი ცალკე კლასშია. მაგალითად: ახლა მხოლოდ single elimination მაქვს (1 წაგება = გავარდნა). თუ მომავალში double elimination დაემატება (ორი წაგების შემდეგ გავარდნა), ახალი კლასი დაიწერება და ორგანიზატორი ტურნირის შექმნისას ფორმატს აირჩევს.
+- Custom Reusable Hooks (frontend). მონაცემების წამოღება ცალკე ფუნქციაშია (hook). მაგალითად: useBracket ფუნქცია, ცხრილს სერვერიდან იღებს და ყოველ 3 წამში განაახლებს. ცხრილის გვერდი უბრალოდ იყენებს ამ hook-ს და ხატავს ცხრილს. თუ ცხრილები სხვა გვერდზეც იქნება საჭირო, იგივე hook-ის გამოყენება მარტივია.
 
 ## API
 
@@ -37,96 +36,48 @@ API REST-ია, Next.js-ის route handler-ებით. ძირითა�
 | GET | `/api/me/teams` | ჩემი გუნდები | US-03 |
 | POST | `/api/tournaments/:id/registrations` | გუნდის რეგისტრაცია, ადგილი 10 წუთით ინახება | US-04 |
 | POST | `/api/matches/:id/result` | მატჩის შედეგის გაგზავნა | US-06 |
+| POST | `/api/matches/:id/confirm` | მეტოქე კაპიტანი ადასტურებს ან ასაჩივრებს შედეგს | US-06 |
 
-შედეგის დასადასტურებლად ცალკე endpoint არ მჭირდება. პირველი კაპიტანი აგზავნის ანგარიშს და მატჩი „ელოდება დადასტურებას" სტატუსში გადადის. თუ მეორე კაპიტანი იგივე ანგარიშს აგზავნის, მატჩი იხურება, თუ სხვას, მატჩი „სადავო" ხდება.
+შედეგის გაგზავნა ასე მუშაობს:
 
-შესვლა, ტურნირის შექმნა და სხვა ოპერაციებიც იქნება, აქ მხოლოდ მთავარი ხუთი ჩამოვწერე.
+1. მატჩის შემდეგ ერთ-ერთი კაპიტანი აგზავნის ანგარიშს და მატჩი „ელოდება დადასტურებას" სტატუსში გადადის. შედეგის გაგზავნა მხოლოდ ერთხელ შეიძლება.
+2. მეორე კაპიტანი ანგარიშს ხედავს და აჭერს „ვადასტურებ" ან „ვასაჩივრებ" ღილაკს. თავის ანგარიშს აღარ წერს, ამიტომ ორი განსხვავებული შედეგი ვერ შეიქმნება.
+3. თუ დაადასტურა, მატჩი იხურება და გამარჯვებული შემდეგ მატჩში გადადის.
+4. თუ გაასაჩივრა, მიზეზი უნდა დაწეროს. მატჩი „სადავო" ხდება. ორგანიზატორი ორივე მხარის მასალას ხედავს და ირჩევს: დაადასტუროს შედეგი, შეცვალოს ან დანიშნოს გადათამაშება. სანამ საიტზე სტრიმინგის ფუნქცია დაემატება, ყველა მატჩი კონსოლის/კომპიუტერის ჩანაწერის ფუნქციით უნდა ჩაიწეროს. სადაოობისას ორგანიზატორი ამ ჩანაწერს ითხოვს. მტკიცებულების გარეშე გასაჩივრება ან გაყალბება სასჯელით სრულდება (გაფრთხილება, განმეორებისას ბლოკი).
+5. თუ მეორე კაპიტანი 10 წუთში არ უპასუხებს, შედეგი ავტომატურად დასტურდება, რომ ტურნირი არ გაჩერდეს.
 
 ## ბაზა
 
-ბაზად PostgreSQL ავირჩიე. მონაცემები ერთმანეთთან მჭიდროდ არის დაკავშირებული (გუნდი, რეგისტრაცია, გადახდა, მატჩი) და გადახდისთვის ტრანზაქციები მჭირდება, ამიტომ SQL უფრო მოხერხებულია.
+ბაზად PostgreSQL ავირჩიე, რადგან მონაცემები ერთმანეთთან დაკავშირებულია (გუნდი, ტურნირი, რეგისტრაცია, მატჩი). SQL-ში ამას ცხრილები და კავშირები კარგად ასახავს, ხოლო შეზღუდვები (მაგ. ერთი გუნდი ერთ ტურნირზე ორჯერ ვერ დარეგისტრირდება) ბაზის დონეზე მოწმდება.
 
-სქემა (შემოკლებული):
+NoSQL (მაგ. MongoDB) არ ავირჩიე, რადგან ის დამოუკიდებელი დოკუმენტებისთვისაა უკეთესი. ამ შემთხვევაში კი თითქმის ყველა მოთხოვნა რამდენიმე ერთეულს აკავშირებს: მაგალითად, ცხრილების საჩვენებლად ერთად არის საჭირო ტურნირი, მატჩები და გუნდები. NoSQL-ში ეს ან რამდენიმე ცალკე მოთხოვნით მოგვიწევდა, ან მონაცემების დუბლირებით (გუნდის სახელი ყველა მატჩში), რაც ცვლილებისას შეცდომებს იწვევს. ასევე, ჩვენი მონაცემების სტრუქტურა წინასწარ ცნობილია და არ იცვლება, ამიტომ NoSQL-ის მოქნილობა აქ არ გვჭირდება.
 
-```sql
-CREATE TABLE users (
-  id            SERIAL PRIMARY KEY,
-  email         TEXT UNIQUE NOT NULL,
-  password_hash TEXT NOT NULL,
-  role          TEXT NOT NULL            -- player, organizer, admin
-);
+სქემა:
 
-CREATE TABLE teams (
-  id         SERIAL PRIMARY KEY,
-  name       TEXT UNIQUE NOT NULL,
-  captain_id INT NOT NULL REFERENCES users(id)
-);
-
-CREATE TABLE team_members (
-  team_id INT REFERENCES teams(id),
-  user_id INT REFERENCES users(id),
-  status  TEXT NOT NULL,                 -- invited, accepted
-  PRIMARY KEY (team_id, user_id)
-);
-
-CREATE TABLE tournaments (
-  id           SERIAL PRIMARY KEY,
-  organizer_id INT NOT NULL REFERENCES users(id),
-  name         TEXT NOT NULL,
-  game         TEXT NOT NULL,
-  starts_at    TIMESTAMPTZ NOT NULL,
-  max_teams    INT NOT NULL CHECK (max_teams IN (4, 8, 16, 32)),
-  entry_fee    NUMERIC(10,2) NOT NULL,
-  status       TEXT NOT NULL             -- draft, open, closed, live, finished
-);
-
-CREATE TABLE registrations (
-  id             SERIAL PRIMARY KEY,
-  tournament_id  INT NOT NULL REFERENCES tournaments(id),
-  team_id        INT NOT NULL REFERENCES teams(id),
-  status         TEXT NOT NULL,          -- reserved, confirmed, expired
-  reserved_until TIMESTAMPTZ,
-  UNIQUE (tournament_id, team_id)
-);
-
-CREATE TABLE payments (
-  id              SERIAL PRIMARY KEY,
-  registration_id INT NOT NULL REFERENCES registrations(id),
-  provider_ref    TEXT UNIQUE NOT NULL,
-  amount          NUMERIC(10,2) NOT NULL,
-  status          TEXT NOT NULL
-);
-
-CREATE TABLE matches (
-  id            SERIAL PRIMARY KEY,
-  tournament_id INT NOT NULL REFERENCES tournaments(id),
-  round         INT NOT NULL,
-  position      INT NOT NULL,
-  team_a_id     INT REFERENCES teams(id),
-  team_b_id     INT REFERENCES teams(id),
-  score_a       INT,
-  score_b       INT,
-  status        TEXT NOT NULL,           -- scheduled, awaiting, disputed, done
-  next_match_id INT REFERENCES matches(id)  -- სად გადადის გამარჯვებული
-);
-
-CREATE INDEX ON matches (tournament_id, round);
+```
+users: id, email, password_hash, role
+teams: id, name, captain_id → users
+team_members: team_id → teams, user_id → users, status
+tournaments: id, organizer_id → users, name, game, starts_at, max_teams, entry_fee, status
+registrations: id, tournament_id → tournaments, team_id → teams, status, reserved_until
+payments: id, registration_id → registrations, provider_ref, amount, status
+matches: id, tournament_id → tournaments, round, position, team_a_id, team_b_id, score_a, score_b, reported_by → teams, reported_at, dispute_reason, evidence_url, status, next_match_id
 ```
 
-ადგილის დაჯავშნა (NFR-05) ერთ ტრანზაქციაშია: ჯერ ტურნირის სტრიქონს ვკეტავ (`SELECT ... FOR UPDATE`), ვითვლი `reserved` და `confirmed` რეგისტრაციებს და თუ ლიმიტი არ არის მიღწეული, ახალ რეგისტრაციას ვამატებ. ასე ორი გუნდი ერთ ადგილს ვერ დაიკავებს. ვადაგასულ `reserved` რეგისტრაციებს cron job ყოველ წუთში ათავისუფლებს.
+ადგილის დაჯავშნა (NFR-05) ერთ ტრანზაქციაშია: გამოითვლება `reserved` და `confirmed` რეგისტრაციები და თუ ტურნირის დაწესებული განსაზღვრული ლიმიტი არ არის მიღწეული, ახალი გუნდი ემატება. ასე ორი გუნდი ერთ ადგილს ვერ დაიკავებს. ვადაგასულ `reserved` რეგისტრაციებს cron job ყოველ წუთში ათავისუფლებს.
 
 ## ტექნოლოგიები
 
-- **Frontend და backend:** Next.js და TypeScript, ერთ პროექტში.
-- **ბაზა:** PostgreSQL და Prisma.
+- **Frontend და backend:** Next.js და Node.js, ერთ პროექტში.
+- **ბაზა:** PostgreSQL (Supabase), ცხრილები `.sql` მიგრაციებით.
 - **ავტორიზაცია:** JWT httpOnly cookie-ში, პაროლები bcrypt-ით.
-- **გადახდა:** TBC ან BOG სატესტო რეჟიმში.
+- **გადახდა:** MVP-ში საკუთარი სატესტო (mock) გადახდა, რომელიც წარმატებულ და წარუმატებელ გადახდას ასიმულირებს. რეალური გაშვების შემთხვევაში Flitt ჩაანაცვლებს.
 - **ტესტები და CI:** Jest, k6 (დატვირთვის ტესტი) და GitHub Actions.
 
 ## რისკები
 
-**ტურნირის დღის დატვირთვა.** ბევრმა ადამიანმა ერთად რომ გახსნას ბრეკეტი, ბაზა შეიძლება გადაიტვირთოს (NFR-01, NFR-02). ბრეკეტის query-სთვის ინდექსი მაქვს და დატვირთვას k6-ით წინასწარ გავტესტავ. ბრეკეტი WebSocket-ის ნაცვლად ყოველ 3 წამში ახლდება (polling), რაც უფრო მარტივია და NFR-03-ს აკმაყოფილებს. თუ ეს არ იკმარებს, კეშს ან WebSocket-ს მერე დავამატებ.
+**ტურნირის დღის დატვირთვა.** ბევრმა ადამიანმა ერთად რომ გახსნას ცხრილი, ბაზა შეიძლება გადაიტვირთოს (NFR-01, NFR-02). ცხრილის query-სთვის ინდექსი მაქვს და დატვირთვას k6-ით წინასწარ გაიტესტება. ბრეკეტი WebSocket-ის ნაცვლად ყოველ 3 წამში ახლდება, რაც უფრო მარტივია და NFR-03-ს აკმაყოფილებს. თუ ეს არ იქნება საკმარისი, ქეშინგი ან WebSocket-ი დამზღვევი ხერხებია.
 
 **გადახდა და ადგილი.** პროვაიდერის webhook შეიძლება დაგვიანდეს ან ორჯერ მოვიდეს. ადგილი 10 წუთით `reserved` სტატუსშია, `provider_ref` უნიკალურია, ამიტომ ერთი გადახდა ორჯერ არ ჩაითვლება, ვადაგასული ადგილი კი თავისუფლდება.
 
-**სამუშაოს მოცულობა.** Must და Should ჯამში 56 ქულაა, რაც ერთი სემესტრისთვის ბევრია. ამიტომ MVP მხოლოდ Must story-ებია (37 ქულა), დანარჩენი დროის მიხედვით.
+**სამუშაოს მოცულობა.** Must და Should ჯამში 56 ქულაა, რაც საკმაოდ მოცულობითია. ამიტომ MVP მხოლოდ Must story-ებია (37 ქულა).
